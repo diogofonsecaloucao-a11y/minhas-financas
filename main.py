@@ -1,42 +1,38 @@
 import streamlit as st
-from streamlit_gsheets import GSheetsConnection
 import pandas as pd
 
-# Configuração da Página
 st.set_page_config(page_title="Finanças Diogo", layout="wide")
 
-st.title("💰 Gestão Financeira (Google Sheets)")
+# O link deve terminar em output=csv
+URL_CSV = "https://docs.google.com/spreadsheets/d/e/2PACX-1vTkPyqbur5kLkAIXNVIDIx1UAU3C-6xxhwAezQqPj0O06fl3TjT0BRJRgt3okezk2FEh4t5gGG6bAev/pub?gid=2004968702&single=true&output=csv"
 
-# URL limpo para evitar o erro 400
-url = "https://docs.google.com/spreadsheets/d/12YOiNnEnsnH4P2cEHp8alI2--KtTGbhhtMx8xO2pOcI/edit#gid=0"
+st.title("💰 Gestão Financeira Real-Time")
 
 try:
-    # Criar a conexão
-    conn = st.connection("gsheets", type=GSheetsConnection)
-
-    # Ler os dados da folha "Transactions"
-    # Adicionei o ttl=0 para garantir que ele lê sempre a versão mais recente
-    df = conn.read(spreadsheet=url, worksheet="Transactions", ttl=0)
-
-    # Limpar e converter a coluna AMOUNT para número
+    # Lê os dados diretamente como CSV
+    df = pd.read_csv(URL_CSV)
+    
+    # Ajuste de nomes de colunas (conforme vi no teu ficheiro)
+    # DATE, TYPE, CATEGORIE, AMOUNT, DESCRIPTION
+    
+    # Limpeza do AMOUNT (remove € e converte para número)
     df['AMOUNT'] = df['AMOUNT'].astype(str).replace(r'[€\s]', '', regex=True).replace(',', '.', regex=True).astype(float)
 
-    # --- DASHBOARD ---
+    # Cálculos
     receitas = df[df['TYPE'] == 'Income']['AMOUNT'].sum()
     despesas = df[df['TYPE'] == 'Expense']['AMOUNT'].sum()
-    saldo_atual = receitas - despesas
+    saldo = receitas - despesas
 
-    col1, col2, col3 = st.columns(3)
-    col1.metric("Receitas Totais", f"{receitas:,.2f} €")
-    col2.metric("Despesas Totais", f"{despesas:,.2f} €", delta=f"-{despesas:,.2f} €", delta_color="inverse")
-    col3.metric("Saldo em Carteira", f"{saldo_atual:,.2f} €")
+    # Dashboard
+    c1, c2, c3 = st.columns(3)
+    c1.metric("Receitas", f"{receitas:,.2f} €")
+    c2.metric("Despesas", f"{despesas:,.2f} €")
+    c3.metric("Saldo Atual", f"{saldo:,.2f} €")
 
     st.divider()
-
-    # --- TABELA ---
-    st.subheader("Histórico de Transações")
-    st.dataframe(df.sort_values(by='DATE', ascending=False), use_container_width=True)
+    st.subheader("Histórico Completo")
+    st.dataframe(df, use_container_width=True)
 
 except Exception as e:
-    st.error(f"Erro técnico: {e}")
-    st.info("Dica: Abre o teu Google Sheets e confirma se o nome da aba no fundo é exatamente 'Transactions' (com T maiúsculo).")
+    st.error(f"Erro na leitura: {e}")
+    st.info("Clica em Ficheiro > Publicar na Web > Transactions > CSV e usa esse link.")
