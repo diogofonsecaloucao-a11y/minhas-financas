@@ -2,98 +2,82 @@ import streamlit as st
 import pandas as pd
 from datetime import datetime
 
-st.set_page_config(page_title="Finanças Diogo", layout="wide")
+# Configuração de App Profissional
+st.set_page_config(page_title="Diogo Finance", layout="centered")
+
+# --- ESTILO BANCO (CSS) ---
+st.markdown("""
+    <style>
+    .stMetric { background-color: #1e1e1e; padding: 15px; border-radius: 10px; border: 1px solid #333; }
+    button[kind="primary"] { background-color: #007bff; border: None; width: 100%; height: 3em; }
+    .stDataFrame { border-radius: 10px; }
+    </style>
+    """, unsafe_allow_html=True)
 
 URL_CSV = "https://docs.google.com/spreadsheets/d/e/2PACX-1vTkPyqbur5kLkAIXNVIDIx1UAU3C-6xxhwAezQqPj0O06fl3TjT0BRJRgt3okezk2FEh4t5gGG6bAev/pub?gid=2004968702&single=true&output=csv"
 
-@st.cache_data(ttl=300) # Atualiza a cada 5 min
 def load_data():
-    raw_df = pd.read_csv(URL_CSV, header=None)
-    start_line = 0
-    for i, row in raw_df.iterrows():
-        if row.astype(str).str.contains('DATE', case=False).any():
-            start_line = i
-            break
-    df = pd.read_csv(URL_CSV, skiprows=start_line)
+    # Lê o CSV ignorando linhas vazias iniciais
+    df = pd.read_csv(URL_CSV, skiprows=range(0, 5)) # Salta o cabeçalho decorativo do Excel
     df.columns = [str(c).strip().upper() for c in df.columns]
-    df = df.loc[:, ~df.columns.str.contains('^UNNAMED')]
     
-    # Tratamento de Datas e Valores
+    # Limpeza rigorosa de valores
+    def clean_currency(x):
+        if isinstance(x, str):
+            return x.replace('€', '').replace(' ', '').replace(',', '.').strip()
+        return x
+
+    df['AMOUNT'] = df['AMOUNT'].apply(clean_currency).astype(float)
     df['DATE'] = pd.to_datetime(df['DATE'], errors='coerce')
-    df['AMOUNT'] = pd.to_numeric(df['AMOUNT'].astype(str).replace(r'[€\s,]', '', regex=True), errors='coerce').fillna(0)
-    df['MONTH'] = df['DATE'].dt.strftime('%b %Y')
-    df['YEAR'] = df['DATE'].dt.year
-    return df.dropna(subset=['DATE'])
+    return df.dropna(subset=['AMOUNT', 'TYPE'])
 
 try:
-    df = load_data()
+    data = load_data()
 
-    # --- SIDEBAR FILTERS ---
-    st.sidebar.title("⚙️ Filtros")
-    # Se não tiveres a coluna ACCOUNT no Excel, o código usará categorias como contas
-    lista_anos = sorted(df['YEAR'].unique().tolist(), reverse=True)
-    filtro_ano = st.sidebar.selectbox("Ano", lista_anos)
-    
-    lista_meses = df[df['YEAR'] == filtro_ano]['MONTH'].unique().tolist()
-    filtro_mes = st.sidebar.multiselect("Meses", lista_meses, default=lista_meses)
-
-    # --- DASHBOARD PRINCIPAL ---
-    st.title("📊 Resumo Financeiro")
-    
-    # Filtrar DF para os cálculos
-    df_filtered = df[(df['YEAR'] == filtro_ano) & (df['MONTH'].isin(filtro_mes))]
-
-    # Cálculos Totais
-    total_receitas = df_filtered[df_filtered['TYPE'].str.contains('Income', case=False, na=False)]['AMOUNT'].sum()
-    total_despesas = df_filtered[df_filtered['TYPE'].str.contains('Expense', case=False, na=False)]['AMOUNT'].sum()
-    patrimonio = total_receitas - total_despesas
-
-    # Layout de Métricas
-    m1, m2, m3 = st.columns(3)
-    m1.metric("Património (Período)", f"{patrimonio:,.2f} €")
-    m2.metric("Receitas", f"{total_receitas:,.2f} €", delta_color="normal")
-    m3.metric("Despesas", f"{total_despesas:,.2f} €", delta=f"-{total_despesas:,.2f}", delta_color="inverse")
+    # --- TOP: INSERIR REGISTO (Sempre visível) ---
+    with st.expander("➕ NOVO MOVIMENTO", expanded=True):
+        with st.form("quick_form"):
+            col_a, col_b = st.columns(2)
+            f_tipo = col_a.selectbox("Tipo", ["Expense", "Income"])
+            f_valor = col_b.number_input("Valor (€)", min_value=0.0, step=0.01)
+            f_cat = st.selectbox("Categoria / Conta", ["Cash", "PPR", "Aforro", "Casa", "Tabaco", "Alimentação"])
+            f_desc = st.text_input("Descrição")
+            if st.form_submit_button("CONFIRMAR REGISTO"):
+                st.info("Para gravar no Excel, use o formulário do Google Sheets. App em modo leitura.")
 
     st.divider()
 
-    # --- CONTAS ESPECÍFICAS ---
-    st.subheader("💰 Saldos por Ativo")
+    # --- DASHBOARD DE BANCO ---
+    # Cálculo total (Income - Expense)
+    total_in = data[data['TYPE'].str.contains('Income', case=False, na=False)]['AMOUNT'].sum()
+    total_out = data[data['TYPE'].str.contains('Expense', case=False, na=False)]['AMOUNT'].sum()
+    balance = total_in - total_out
+
+    st.metric("SALDO TOTAL", f"{balance:,.2f} €")
+
+    st.write("### As minhas Contas")
     c1, c2, c3 = st.columns(3)
     
-    # Nota: Aqui o código assume que tens uma coluna CATEGORIE ou ACCOUNT 
-    # Vou filtrar por categorias comuns que pediste
-    ppr_val = df[df.astype(str).apply(lambda x: x.str.contains('PPR', case=False)).any(axis=1)]['AMOUNT'].sum()
-    aforro_val = df[df.astype(str).apply(lambda x: x.str.contains('Aforro', case=False)).any(axis=1)]['AMOUNT'].sum()
-    cash_val = df[df.astype(str).apply(lambda x: x.str.contains('Cash|Dinheiro', case=False)).any(axis=1)]['AMOUNT'].sum()
+    # Filtros por conta (procurando na coluna CATEGORIE ou DESCRIPTION)
+    def get_val(name):
+        return data[data.apply(lambda row: row.astype(str).str.contains(name, case=False).any(), axis=1)]['AMOUNT'].sum()
 
-    c1.info(f"**PPR**\n\n {ppr_val:,.2f} €")
-    c2.info(f"**Cert. Aforro**\n\n {aforro_val:,.2f} €")
-    c3.info(f"**Cash**\n\n {cash_val:,.2f} €")
+    # Nota: O cálculo abaixo é uma estimativa baseada nos nomes
+    c1.metric("PPR", f"{get_val('PPR'):,.2f} €")
+    c2.metric("Aforro", f"{get_val('Aforro'):,.2f} €")
+    c3.metric("Cash", f"{get_val('Cash'):,.2f} €")
 
     st.divider()
 
-    # --- GRÁFICOS ---
-    col_graph1, col_graph2 = st.columns(2)
-    
-    with col_graph1:
-        st.write("### Despesas por Categoria")
-        despesas_cat = df_filtered[df_filtered['TYPE'].str.contains('Expense', case=False, na=False)].groupby('CATEGORIE')['AMOUNT'].sum()
-        st.bar_chart(despesas_cat)
-
-    with col_graph2:
-        st.write("### Evolução Mensal")
-        evolucao = df_filtered.groupby('MONTH')['AMOUNT'].sum()
-        st.line_chart(evolucao)
-
-    # --- FORMULÁRIO DE INSERÇÃO (Flutuante no fundo ou nova aba) ---
-    with st.expander("➕ Inserir Novo Registo"):
-        with st.form("form_novo"):
-            f_tipo = st.selectbox("Tipo", ["Expense", "Income"])
-            f_conta = st.selectbox("Conta/Ativo", ["Banco", "PPR", "Aforro", "Cash"])
-            f_valor = st.number_input("Valor", min_value=0.0)
-            f_submit = st.form_submit_button("Submeter")
-            if f_submit:
-                st.warning("A submissão direta para o Sheets requer configuração de API. O registo foi simulado.")
+    # --- ÚLTIMOS MOVIMENTOS ---
+    st.write("### Últimos Movimentos")
+    st.dataframe(
+        data[['DATE', 'TYPE', 'CATEGORIE', 'AMOUNT', 'DESCRIPTION']]
+        .sort_values(by='DATE', ascending=False)
+        .head(10),
+        use_container_width=True,
+        hide_index=True
+    )
 
 except Exception as e:
-    st.error(f"Erro ao processar dashboard: {e}")
+    st.error("Erro ao carregar dados. Verifique se o Excel tem a coluna 'AMOUNT' e 'TYPE' preenchidas corretamente.")
