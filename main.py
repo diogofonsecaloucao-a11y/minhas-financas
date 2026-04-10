@@ -4,7 +4,7 @@ import pandas as pd
 st.set_page_config(page_title="Finanças Diogo", layout="wide")
 
 # O teu link de Publicar na Web (CSV)
-URL_CSV = "COLA_AQUI_O_TEU_LINK_CSV" 
+URL_CSV = "https://docs.google.com/spreadsheets/d/e/2PACX-1vTkPyqbur5kLkAIXNVIDIx1UAU3C-6xxhwAezQqPj0O06fl3TjT0BRJRgt3okezk2FEh4t5gGG6bAev/pub?gid=2004968702&single=true&output=csv" 
 
 st.title("💰 Gestão Financeira Real-Time")
 
