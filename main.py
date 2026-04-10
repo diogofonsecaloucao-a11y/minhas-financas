@@ -1,0 +1,79 @@
+import streamlit as st
+import pandas as pd
+from datetime import datetime
+import os
+
+# Configuração da Página
+st.set_page_config(page_title="Minhas Finanças", layout="wide")
+
+# --- BASE DE DADOS (CSV) ---
+def load_data():
+    if not os.path.exists('transacoes.csv'):
+        df = pd.DataFrame(columns=['Data', 'Descrição', 'Valor', 'Categoria', 'Conta', 'Tipo'])
+        df.to_csv('transacoes.csv', index=False)
+    return pd.read_csv('transacoes.csv')
+
+def save_transaction(data, desc, valor, cat, conta, tipo):
+    df = load_data()
+    new_row = pd.DataFrame([[data, desc, valor, cat, conta, tipo]], 
+                          columns=['Data', 'Descrição', 'Valor', 'Categoria', 'Conta', 'Tipo'])
+    df = pd.concat([df, new_row], ignore_index=True)
+    df.to_csv('transacoes.csv', index=False)
+
+# --- LÓGICA DE SALDOS ---
+df = load_data()
+contas_predefinidas = ['Banco 1', 'Banco 2', 'Banco 3', 'PPR', 'Certificados Aforro', 'Dinheiro Físico']
+categorias_base = ['Alimentação', 'Lazer', 'Saúde', 'Transportes', 'Casa', 'Investimento', 'Outros']
+
+# --- INTERFACE ---
+st.title("💰 Gestão Financeira Pessoal")
+
+# Sidebar para Inserção
+st.sidebar.header("Novo Registo")
+tipo = st.sidebar.selectbox("Tipo", ["Despesa", "Receita", "Transferência"])
+data = st.sidebar.date_input("Data", datetime.now())
+valor = st.sidebar.number_input("Valor (€)", min_value=0.0, step=0.01)
+desc = st.sidebar.text_input("Descrição")
+
+if tipo == "Transferência":
+    origem = st.sidebar.selectbox("De:", contas_predefinidas)
+    destino = st.sidebar.selectbox("Para:", contas_predefinidas)
+    if st.sidebar.button("Registar Transferência"):
+        save_transaction(data, f"Transf: {desc}", -valor, "Transferência", origem, "Saída")
+        save_transaction(data, f"Transf: {desc}", valor, "Transferência", destino, "Entrada")
+        st.sidebar.success("Transferência concluída!")
+        st.rerun()
+else:
+    conta = st.sidebar.selectbox("Conta", contas_predefinidas)
+    cat = st.sidebar.selectbox("Categoria", categorias_base)
+    if st.sidebar.button("Guardar"):
+        final_valor = -valor if tipo == "Despesa" else valor
+        save_transaction(data, desc, final_valor, cat, conta, tipo)
+        st.sidebar.success("Registado com sucesso!")
+        st.rerun()
+
+# --- DASHBOARD ---
+# Cálculo de Saldos
+saldos = {conta: df[df['Conta'] == conta]['Valor'].sum() for conta in contas_predefinidas}
+total_patrimonio = sum(saldos.values())
+
+st.metric("Património Total", f"{total_patrimonio:,.2f} €")
+
+cols = st.columns(3)
+for i, (conta, saldo) in enumerate(saldos.items()):
+    cols[i % 3].metric(conta, f"{saldo:,.2f} €")
+
+st.divider()
+
+# Gráfico e Tabela
+if not df.empty:
+    st.subheader("Análise de Gastos")
+    df_gastos = df[df['Valor'] < 0]
+    if not df_gastos.empty:
+        gastos_cat = df_gastos.groupby('Categoria')['Valor'].sum().abs()
+        st.bar_chart(gastos_cat)
+    
+    st.subheader("Histórico Recente")
+    st.dataframe(df.sort_values(by='Data', ascending=False), use_container_width=True)
+else:
+    st.info("Ainda não existem transações. Começa a registar na barra lateral!")
