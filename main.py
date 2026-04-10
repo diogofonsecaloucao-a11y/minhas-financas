@@ -1,83 +1,71 @@
 import streamlit as st
 import pandas as pd
-from datetime import datetime
 
-# Configuração de App Profissional
+# Design Estilo Banco
 st.set_page_config(page_title="Diogo Finance", layout="centered")
 
-# --- ESTILO BANCO (CSS) ---
 st.markdown("""
     <style>
-    .stMetric { background-color: #1e1e1e; padding: 15px; border-radius: 10px; border: 1px solid #333; }
-    button[kind="primary"] { background-color: #007bff; border: None; width: 100%; height: 3em; }
-    .stDataFrame { border-radius: 10px; }
+    .stMetric { background-color: #111; border-radius: 10px; padding: 15px; border: 1px solid #333; }
+    [data-testid="stForm"] { border: 1px solid #007bff; border-radius: 15px; }
     </style>
     """, unsafe_allow_html=True)
 
 URL_CSV = "https://docs.google.com/spreadsheets/d/e/2PACX-1vTkPyqbur5kLkAIXNVIDIx1UAU3C-6xxhwAezQqPj0O06fl3TjT0BRJRgt3okezk2FEh4t5gGG6bAev/pub?gid=2004968702&single=true&output=csv"
 
-def load_data():
-    # Lê o CSV ignorando linhas vazias iniciais
-    df = pd.read_csv(URL_CSV, skiprows=range(0, 5)) # Salta o cabeçalho decorativo do Excel
-    df.columns = [str(c).strip().upper() for c in df.columns]
+def get_clean_data():
+    # Lê os dados e encontra onde a tabela começa mesmo
+    raw = pd.read_csv(URL_CSV, header=None)
+    header_idx = raw.index[raw.astype(str).apply(lambda x: x.str.contains('DATE', case=False)).any(axis=1)].tolist()[0]
+    df = pd.read_csv(URL_CSV, skiprows=header_idx)
+    df.columns = [c.strip().upper() for c in df.columns]
     
-    # Limpeza rigorosa de valores
-    def clean_currency(x):
-        if isinstance(x, str):
-            return x.replace('€', '').replace(' ', '').replace(',', '.').strip()
-        return x
-
-    df['AMOUNT'] = df['AMOUNT'].apply(clean_currency).astype(float)
-    df['DATE'] = pd.to_datetime(df['DATE'], errors='coerce')
+    # Limpa valores: remove € e converte para número
+    df['AMOUNT'] = df['AMOUNT'].astype(str).str.replace('€', '').str.replace(' ', '').str.replace(',', '.').astype(float)
     return df.dropna(subset=['AMOUNT', 'TYPE'])
 
 try:
-    data = load_data()
+    data = get_clean_data()
 
-    # --- TOP: INSERIR REGISTO (Sempre visível) ---
-    with st.expander("➕ NOVO MOVIMENTO", expanded=True):
-        with st.form("quick_form"):
-            col_a, col_b = st.columns(2)
-            f_tipo = col_a.selectbox("Tipo", ["Expense", "Income"])
-            f_valor = col_b.number_input("Valor (€)", min_value=0.0, step=0.01)
-            f_cat = st.selectbox("Categoria / Conta", ["Cash", "PPR", "Aforro", "Casa", "Tabaco", "Alimentação"])
-            f_desc = st.text_input("Descrição")
-            if st.form_submit_button("CONFIRMAR REGISTO"):
-                st.info("Para gravar no Excel, use o formulário do Google Sheets. App em modo leitura.")
+    # --- 1. ÁREA DE REGISTO (NO TOPO) ---
+    st.title("🏦 Diogo Digital Bank")
+    with st.form("new_entry"):
+        st.write("### ➕ Novo Registo")
+        c1, c2 = st.columns(2)
+        f_tipo = c1.selectbox("Tipo", ["Expense", "Income"])
+        f_valor = c2.number_input("Valor (€)", min_value=0.0, step=0.01)
+        f_cat = st.selectbox("Conta / Categoria", ["Cash", "PPR", "Certificados Aforro", "Banco", "Tabaco", "Alimentação"])
+        f_desc = st.text_input("Descrição (Ex: Jantar, Reforço PPR)")
+        if st.form_submit_button("CONFIRMAR E GUARDAR"):
+            st.warning("⚠️ Para gravar permanentemente, insere no teu Google Sheets. Esta App está em modo visualização.")
 
     st.divider()
 
-    # --- DASHBOARD DE BANCO ---
-    # Cálculo total (Income - Expense)
-    total_in = data[data['TYPE'].str.contains('Income', case=False, na=False)]['AMOUNT'].sum()
-    total_out = data[data['TYPE'].str.contains('Expense', case=False, na=False)]['AMOUNT'].sum()
-    balance = total_in - total_out
+    # --- 2. DASHBOARD DE SALDOS ---
+    total_in = data[data['TYPE'].str.contains('Income', case=False)]['AMOUNT'].sum()
+    total_out = data[data['TYPE'].str.contains('Expense', case=False)]['AMOUNT'].sum()
+    saldo_real = total_in - total_out
 
-    st.metric("SALDO TOTAL", f"{balance:,.2f} €")
+    st.metric("SALDO TOTAL DISPONÍVEL", f"{saldo_real:,.2f} €")
 
-    st.write("### As minhas Contas")
-    c1, c2, c3 = st.columns(3)
+    st.write("#### Meus Ativos")
+    m1, m2, m3 = st.columns(3)
     
-    # Filtros por conta (procurando na coluna CATEGORIE ou DESCRIPTION)
-    def get_val(name):
-        return data[data.apply(lambda row: row.astype(str).str.contains(name, case=False).any(), axis=1)]['AMOUNT'].sum()
+    # Função para somar por conta específica
+    def soma_conta(nome):
+        mask = data.apply(lambda x: x.astype(str).str.contains(nome, case=False)).any(axis=1)
+        return data[mask]['AMOUNT'].sum()
 
-    # Nota: O cálculo abaixo é uma estimativa baseada nos nomes
-    c1.metric("PPR", f"{get_val('PPR'):,.2f} €")
-    c2.metric("Aforro", f"{get_val('Aforro'):,.2f} €")
-    c3.metric("Cash", f"{get_val('Cash'):,.2f} €")
+    m1.metric("PPR", f"{soma_conta('PPR'):,.2f} €")
+    m2.metric("Aforro", f"{soma_conta('Aforro'):,.2f} €")
+    m3.metric("Cash", f"{soma_conta('Cash'):,.2f} €")
 
     st.divider()
 
-    # --- ÚLTIMOS MOVIMENTOS ---
-    st.write("### Últimos Movimentos")
-    st.dataframe(
-        data[['DATE', 'TYPE', 'CATEGORIE', 'AMOUNT', 'DESCRIPTION']]
-        .sort_values(by='DATE', ascending=False)
-        .head(10),
-        use_container_width=True,
-        hide_index=True
-    )
+    # --- 3. ÚLTIMOS MOVIMENTOS ---
+    st.write("#### Movimentos Recentes")
+    st.dataframe(data[['DATE', 'TYPE', 'CATEGORIE', 'AMOUNT', 'DESCRIPTION']].head(10), 
+                 use_container_width=True, hide_index=True)
 
-except Exception as e:
-    st.error("Erro ao carregar dados. Verifique se o Excel tem a coluna 'AMOUNT' e 'TYPE' preenchidas corretamente.")
+except Exception:
+    st.error("A carregar base de dados... Se este erro persistir, verifica se o cabeçalho no Excel está na primeira linha.")
