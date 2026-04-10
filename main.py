@@ -1,38 +1,27 @@
 import streamlit as st
+from streamlit_gsheets import GSheetsConnection
 import pandas as pd
-import gspread
-from datetime import datetime
 
 # Configuração da Página
 st.set_page_config(page_title="Finanças Diogo", layout="wide")
 
-# --- CONEXÃO GOOGLE SHEETS ---
-# URL do teu ficheiro que me passaste
-SHEET_URL = "https://docs.google.com/spreadsheets/d/12YOiNnEnsnH4P2cEHp8alI2--KtTGbhhtMx8xO2pOcI/edit?usp=sharing"
-
-def load_data():
-    # Ligação pública (funciona porque puseste como "Qualquer pessoa com link pode editar")
-    gc = gspread.public_api()
-    sh = gc.open_by_url(SHEET_URL)
-    worksheet = sh.worksheet("Transactions")
-    data = worksheet.get_all_records()
-    df = pd.DataFrame(data)
-    # Limpeza de valores monetários (remove € e converte para número)
-    if 'AMOUNT' in df.columns:
-        df['AMOUNT'] = df['AMOUNT'].replace(r'[€\s,]', '', regex=True).replace('', '0').astype(float)
-    return df
-
-# --- INTERFACE ---
 st.title("💰 Gestão Financeira (Google Sheets)")
 
+# URL do teu ficheiro (com acesso público para editar)
+url = "https://docs.google.com/spreadsheets/d/12YOiNnEnsnH4P2cEHp8alI2--KtTGbhhtMx8xO2pOcI/edit?usp=sharing"
+
 try:
-    df = load_data()
+    # Criar a conexão
+    conn = st.connection("gsheets", type=GSheetsConnection)
 
-    # Sidebar para mostrar que está ligado
-    st.sidebar.success("Ligado ao Google Sheets!")
-    st.sidebar.info(f"Últimos registos lidos: {len(df)}")
+    # Ler os dados da folha "Transactions"
+    df = conn.read(spreadsheet=url, worksheet="Transactions")
 
-    # DASHBOARD COM DADOS REAIS
+    # Limpar e converter a coluna AMOUNT para número
+    # Remove o símbolo € e espaços para não dar erro nos cálculos
+    df['AMOUNT'] = df['AMOUNT'].replace(r'[€\s]', '', regex=True).replace(',', '.', regex=True).astype(float)
+
+    # --- DASHBOARD ---
     receitas = df[df['TYPE'] == 'Income']['AMOUNT'].sum()
     despesas = df[df['TYPE'] == 'Expense']['AMOUNT'].sum()
     saldo_atual = receitas - despesas
@@ -44,10 +33,11 @@ try:
 
     st.divider()
 
-    # TABELA DE TRANSAÇÕES
-    st.subheader("Histórico do Google Sheets")
+    # --- TABELA ---
+    st.subheader("Histórico de Transações")
+    # Mostrar a tabela formatada (da mais recente para a mais antiga)
     st.dataframe(df.sort_values(by='DATE', ascending=False), use_container_width=True)
 
 except Exception as e:
-    st.error(f"Erro ao ligar ao Sheets: {e}")
-    st.info("Verifica se o ficheiro ainda está partilhado como 'Qualquer pessoa com o link pode editar'.")
+    st.error(f"Erro ao carregar dados: {e}")
+    st.info("Dica: Confirma se o nome da folha no Excel é exatamente 'Transactions'.")
